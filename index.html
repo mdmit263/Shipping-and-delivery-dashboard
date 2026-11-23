@@ -377,7 +377,7 @@ function drawG(fresh){
 }
 
 /* ===== Overview: portfolio Gantt (one row per job) ===== */
-let PF={pm:'',st:'',sort:0};const PSTAT=j=>(DATA.pst&&DATA.pst[String(j).split('#')[0]])||'Not on PMO dashboard';const PLW=250;
+let PF={pm:'',st:'',cu:'',ms:'',sort:0,hide:{}};function pgTog(k){PF.hide[k]=!PF.hide[k];drawPG(false)}const PSTAT=j=>(DATA.pst&&DATA.pst[String(j).split('#')[0]])||'Not on PMO dashboard';const PLW=250;
 const PMS={ifc:['IFC','#8b5cf6'],bom:['Design / BOM review','#f59e0b'],start:['Production start','#1e8e5a']};
 function pgDates(r){
   const t=r.thr||{};
@@ -397,14 +397,14 @@ function pgBase(){
   return {have,missing};
 }
 function pgRows(){
-  return pgBase().have.filter(({p})=>(!PF.pm||p.pm===PF.pm)&&(!PF.st||PSTAT(p.id)===PF.st)).map(({p,rec})=>{const r=Object.assign({},rec,{pm:p.pm});return {r,d:pgDates(r)}})
+  return pgBase().have.filter(({p,rec})=>(!PF.pm||p.pm===PF.pm)&&(!PF.st||PSTAT(p.id)===PF.st)&&(!PF.cu||(rec.customer||'Unknown')===PF.cu)).map(({p,rec})=>{const r=Object.assign({},rec,{pm:p.pm});return {r,d:pgDates(r)}}).filter(({r,d})=>!PF.ms||!!({ifc:d.ifc,bom:d.bom,start:d.start,jl:r.jlD,pr:r.prodEff})[PF.ms])
     .sort((a,b)=>PF.sort?PF.sort*String(a.r.job).localeCompare(String(b.r.job),undefined,{numeric:true})
       :((a.r.eff||new Date(2999,0,1))-(b.r.eff||new Date(2999,0,1)))||a.r.job.localeCompare(b.r.job));
 }
 function pgSort(){PF.sort=PF.sort===0?1:PF.sort===1?-1:0;drawPG(false)}
 function rel(d){const n=diff(d,TODAY);return n===0?'today':n>0?'in '+n+' days':Math.abs(n)+' days ago'}
 function pgCard(){
-  return `<div class="card" style="margin-bottom:14px"><h3>Portfolio view</h3><div class="body"><div class="toolbar"><select id="pst"><option value="">All jobs</option>${["In Progress","On Hold","Completed","Not Set"].map(x=>`<option>${x}</option>`).join('')}</select><select id="ppm"><option value="">All PMs</option>${[...new Set(pgBase().have.map(x=>x.p.pm))].sort().map(p=>`<option>${esc(p)}</option>`).join('')}</select><span class="muted" id="pcnt"></span></div><div id="pgantt"></div><div class="legend" id="plg" style="margin-top:10px"></div></div></div>`;
+  return `<div class="card" style="margin-bottom:14px"><h3>Portfolio view</h3><div class="body"><div class="toolbar"><select id="pst"><option value="">All jobs</option>${["In Progress","On Hold","Completed","Not Set"].map(x=>`<option>${x}</option>`).join('')}</select><select id="pms"><option value="">All milestones</option><option value="ifc">Has IFC date</option><option value="bom">Has Design / BOM review date</option><option value="start">Has Production start date</option><option value="jl">Has Job List ship date</option><option value="pr">Has Production ship date</option></select><select id="pcu"><option value="">All customers</option>${[...new Set(pgBase().have.map(x=>x.rec.customer||'Unknown'))].sort((a,b)=>a.localeCompare(b)).map(c=>`<option>${esc(c)}</option>`).join('')}</select><select id="ppm"><option value="">All PMs</option>${[...new Set(pgBase().have.map(x=>x.p.pm))].sort().map(p=>`<option>${esc(p)}</option>`).join('')}</select><span class="muted" id="pcnt"></span></div><div id="pgantt"></div><div class="legend" id="plg" style="margin-top:10px"></div></div></div>`;
 }
 function drawPG(fresh){
   const el=$('#pgantt');if(!el)return;
@@ -412,7 +412,7 @@ function drawPG(fresh){
   $('#pcnt').textContent=rows.length+' job'+(rows.length===1?'':'s');
   if(!rows.length){el.innerHTML='<div class="empty">No jobs match this filter</div>';$('#plg').innerHTML='';return}
   const old=$('#pgw'),keep=old&&!fresh,sl=keep?old.scrollLeft:0,stp=keep?old.scrollTop:0;
-  const OLD=addD(TODAY,-365),dts=[TODAY];rows.forEach(({r,d})=>[d.ifc,d.bom,d.start,r.prodEff,r.jlD].forEach(x=>x&&x>=OLD&&dts.push(x)));
+  const H=PF.hide,OLD=addD(TODAY,-365),dts=[TODAY],vis=(r,d)=>[H.ifc?null:d.ifc,H.bom?null:d.bom,H.start?null:d.start,H.pr?null:r.prodEff,H.jl?null:r.jlD];rows.forEach(({r,d})=>vis(r,d).forEach(x=>x&&x>=OLD&&dts.push(x)));
   let a=new Date(Math.min(...dts)),b=new Date(Math.max(...dts));
   a=new Date(a.getFullYear(),a.getMonth(),1);b=addD(new Date(b.getFullYear(),b.getMonth()+1,1),0);
   const days=diff(b,a),avail=Math.max(600,(el.clientWidth||1200)-PLW-4),dw=Math.min(8,Math.max(2.2,avail/days)),TW=Math.round(days*dw),X=d=>Math.max(0,diff(d,a)*dw);
@@ -421,21 +421,22 @@ function drawPG(fresh){
   let body='';
   rows.forEach(({r,d})=>{
     const mk=[];
-    const pts=[d.ifc,d.bom,d.start,r.prodEff,r.jlD].filter(Boolean);
+    const pts=vis(r,d).filter(Boolean);
     let g='';
     if(pts.length){const lo=new Date(Math.min(...pts)),hi=new Date(Math.max(...pts));g=`<i class="pgt" style="left:${X(lo)}px;width:${Math.max(0,X(hi)-X(lo))}px"></i>`}
-    if(r.prodEff&&r.jlD&&diff(r.prodEff,r.jlD)!==0){const x0=Math.min(X(r.prodEff),X(r.jlD)),x1=Math.max(X(r.prodEff),X(r.jlD));g+=`<i class="pgg" style="left:${x0}px;width:${x1-x0}px"></i>`}
+    if(!H.gap&&!H.pr&&!H.jl&&r.prodEff&&r.jlD&&diff(r.prodEff,r.jlD)!==0){const x0=Math.min(X(r.prodEff),X(r.jlD)),x1=Math.max(X(r.prodEff),X(r.jlD));g+=`<i class="pgg" style="left:${x0}px;width:${x1-x0}px"></i>`}
     const dot=(cls,date,color,title,sub)=>`<i class="pk ${cls}" style="left:${X(date)-6}px;${color?`--c:${color}`:''}" ${ta(`<b>${esc(r.job)} · ${title}</b><div>${fl(date)}</div><div class="tm">${sub}${date<OLD?' (more than a year back, drawn at the left edge: check the date)':''}</div><div class="tr"><span>From viewing date</span><b>${rel(date)}</b></div>`)}></i>`;
-    if(d.ifc)g+=dot('pk-m',d.ifc,PMS.ifc[1],'IFC','Issued for construction. Source: '+d.ifcSrc);
-    if(d.bom)g+=dot('pk-m',d.bom,PMS.bom[1],'Design / BOM review','Source: '+d.bomSrc);
-    if(d.start)g+=dot('pk-m',d.start,PMS.start[1],'Production start',d.startSrc);
-    if(r.jlD)g+=dot('pk-jl',r.jlD,'','Job List ship date','Ship date in the Job List');
-    if(r.prodEff)g+=dot('pk-pr',r.prodEff,'','Production ship date','Source: '+r.prodSrc);
+    if(d.ifc&&!H.ifc)g+=dot('pk-m',d.ifc,PMS.ifc[1],'IFC','Issued for construction. Source: '+d.ifcSrc);
+    if(d.bom&&!H.bom)g+=dot('pk-m',d.bom,PMS.bom[1],'Design / BOM review','Source: '+d.bomSrc);
+    if(d.start&&!H.start)g+=dot('pk-m',d.start,PMS.start[1],'Production start',d.startSrc);
+    if(r.jlD&&!H.jl)g+=dot('pk-jl',r.jlD,'','Job List ship date','Ship date in the Job List');
+    if(r.prodEff&&!H.pr)g+=dot('pk-pr',r.prodEff,'','Production ship date','Source: '+r.prodSrc);
     body+=`<div class="gr pg" data-job="${esc(r.id)}"><div class="gl pgl2"><span class="gc"><span class="job">${esc(r.job)}</span>${r.qty>1?`<span class="muted"> ×${fmt(r.qty)}</span>`:''}</span><span class="gcu">${esc(r.customer||'—')}</span></div><div class="gt" style="width:${TW}px">${g}</div></div>`;
   });
-  el.innerHTML=`<div class="gwrap" id="pgw"><div class="gin" style="width:${PLW+TW}px"><div class="ghd"><div class="gl pgl2 gh"><span class="pgsort" onclick="pgSort()" title="Click to sort by Job ID">Job${PF.sort===1?' ▲':PF.sort===-1?' ▼':''}</span><span>Customer</span></div><div class="gt gh2" style="width:${TW}px">${hm}</div></div><div class="pgov" style="left:${PLW}px;width:${TW}px">${gl}<i class="gtd" style="left:${X(TODAY)}px"></i></div>${body}</div></div>`;
+  el.innerHTML=`<div class="gwrap" id="pgw"><div class="gin" style="width:${PLW+TW}px"><div class="ghd"><div class="gl pgl2 gh"><span class="pgsort" onclick="pgSort()" title="Click to sort by Job ID">Job${PF.sort===1?' ▲':PF.sort===-1?' ▼':''}</span><span>Customer</span></div><div class="gt gh2" style="width:${TW}px">${hm}</div></div><div class="pgov" style="left:${PLW}px;width:${TW}px">${gl}${H.view?'':`<i class="gtd" style="left:${X(TODAY)}px"></i>`}</div>${body}</div></div>`;
   $('#pgw').scrollLeft=keep?sl:0;$('#pgw').scrollTop=stp;
-  $('#plg').innerHTML=Object.values(PMS).map(m=>`<span><i style="background:${m[1]};border-radius:50%"></i>${m[0]}</span>`).join('')+`<span><i class="lgj" style="display:inline-block"></i>Job List ship date</span><span><i style="background:#1f2328;border-radius:50%"></i>Production ship date</span><span><i style="background:#f4a49c;height:3px;border-radius:2px"></i>Gap between the two ship dates</span><span><i style="background:${COL.major};width:3px;height:12px;border-radius:0"></i>Viewing date</span>`;
+  const lg=(k,i,t)=>`<span class="lgt${H[k]?' off':''}" onclick="pgTog('${k}')" title="Click to ${H[k]?'show':'hide'} this milestone" style="cursor:pointer;${H[k]?'opacity:.4;text-decoration:line-through':''}">${i}${t}</span>`;
+  $('#plg').innerHTML=Object.entries(PMS).map(([k,m])=>lg(k,`<i style="background:${m[1]};border-radius:50%"></i>`,m[0])).join('')+lg('jl','<i class="lgj" style="display:inline-block"></i>','Job List ship date')+lg('pr','<i style="background:#1f2328;border-radius:50%"></i>','Production ship date')+lg('gap','<i style="background:#f4a49c;height:3px;border-radius:2px"></i>','Gap between the two ship dates')+lg('view',`<i style="background:${COL.major};width:3px;height:12px;border-radius:0"></i>`,'Viewing date')+`<span class="muted" style="margin-left:6px">Click a milestone to hide or show it</span>`;
 }
 
 function vOverview(){
@@ -565,7 +566,7 @@ function render(){
   $('#nav').innerHTML=Object.entries(VIEWS).map(([k,v])=>`<button class="${k===CUR?'on':''}" onclick="go('${k}')">${v[0]}${k==='align'&&mis?`<span class="cnt" ${ta('<b>'+mis+' jobs not aligned</b><div>Jobs whose Production date and Job List date differ.</div>')}>${mis}</span>`:''}</button>`).join('');
   $('#v').innerHTML=VIEWS[CUR][1]();
   if(CUR==='align'){drawAlign();$('#afs').value=AF.st;$('#apm').value=AF.pm;$('#aq').value=AF.q;$('#afs').onchange=e=>{AF.st=e.target.value;drawAlign();bindRows()};$('#apm').onchange=e=>{AF.pm=e.target.value;drawAlign();bindRows()};$('#aq').oninput=e=>{AF.q=e.target.value;drawAlign();bindRows()}}
-  if(CUR==='over'){drawPG(true);$('#ppm').value=PF.pm;$('#ppm').onchange=e=>{PF.pm=e.target.value;drawPG(true)};$('#pst').value=PF.st;$('#pst').onchange=e=>{PF.st=e.target.value;drawPG(true)}}
+  if(CUR==='over'){drawPG(true);$('#ppm').value=PF.pm;$('#ppm').onchange=e=>{PF.pm=e.target.value;drawPG(true)};$('#pms').value=PF.ms;$('#pms').onchange=e=>{PF.ms=e.target.value;drawPG(true)};$('#pcu').value=PF.cu;$('#pcu').onchange=e=>{PF.cu=e.target.value;drawPG(true)};$('#pst').value=PF.st;$('#pst').onchange=e=>{PF.st=e.target.value;drawPG(true)}}
   if(CUR==='next'){drawG(true);$('#gsc').value=GF.scope;$('#gpm').value=GF.pm;$('#gst').value=GF.stage;$('#gsc').onchange=e=>{GF.scope=e.target.value;drawG(true)};$('#gpm').onchange=e=>{GF.pm=e.target.value;drawG(true)};$('#gst').onchange=e=>{GF.stage=e.target.value;drawG(true)}}
   bindRows();
   const pa=P(DATA.prod_asof),pt=P(DATA.thr_asof);
